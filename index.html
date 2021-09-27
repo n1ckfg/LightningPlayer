@@ -276,7 +276,9 @@
 			    resetCameraPosition();
 				setupWasd();
 				setupMouse();
-				draw();
+				
+				//draw(); // old way
+				renderer.setAnimationLoop(draw); // new way
 			}
 
 
@@ -287,7 +289,7 @@
 				
 				composer.render();
 
-				requestAnimationFrame(draw);
+				//requestAnimationFrame(draw); // old way
 			}
 
 			init();				
