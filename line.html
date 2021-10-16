@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+
+	<head>
+	    <meta charset="utf-8">
+		<title>LightningPlayer</title>
+    	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    	<meta property="og:image" content="thumbnail.gif">
+   		<link rel="stylesheet" href="./css/main.css">
+		<script src="./js/libraries/latk.min.js"></script>
+		<script src="./js/libraries/threejs/three.min.js"></script>
+		<script src="./js/libraries/threejs/THREE.MeshLine.js"></script>
+		<script src="./js/libraries/threejs/CopyShader.js"></script>
+		<script src="./js/libraries/threejs/LuminosityHighPassShader.js"></script>
+		<script src="./js/libraries/threejs/EffectComposer.js"></script>
+		<script src="./js/libraries/threejs/ShaderPass.js"></script>
+		<script src="./js/libraries/threejs/RenderPass.js"></script>
+		<script src="./js/libraries/threejs/UnrealBloomPass.js"></script>
+		<script src="./js/general-util.js"></script>
+		<script src="./js/threejs-util.js"></script>
+		<script src="./js/threejs-wasd.js"></script>
+		<script src="./js/threejs-mouse.js"></script>
+	</head>
+
+	<body>
+		<script>
+			"use strict";
+
+			// ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ 
+			let latk;
+			let latkFps = 12;
+			let latkFpsInterval;
+			let latkFpsDelta = 0;
+			let counter = 0;
+			let bgLayerIndex = 1;
+			let longestLayer = 0;
+			// ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ 
+
+			const renderer = new THREE.WebGLRenderer({ antialiasing: false, alpha: false });
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setClearColor(0x000000);
+
+			const exposure = 1.2;
+			renderer.toneMapping = THREE.ReinhardToneMapping;
+			renderer.toneMappingExposure = Math.pow(exposure, 4.0);
+
+			renderer.autoClear = false;
+			document.body.appendChild(renderer.domElement);
+
+			const cameraFov = 60;
+			const cameraAspect = window.innerWidth / window.innerHeight;
+			const cameraNear = 0.1;
+			const cameraFar = 100;
+
+			const camera = new THREE.PerspectiveCamera(cameraFov, cameraAspect, cameraNear, cameraFar);
+
+			const clock = new THREE.Clock();
+
+			const scene = new THREE.Scene();
+			const fogColor = 0x000000;
+			const fogDensity = 0.00375;
+			scene.fog = new THREE.FogExp2(fogColor, fogDensity);
+			scene.background = new THREE.Color("#000000");  
+
+			const meshLineWidth = 0.6;
+			const meshLineOpacity = 0.1;
+			const meshLineResolution = 1;
+
+			const mat1 = new THREE.LineBasicMaterial({ color: 0x55ff55 });
+
+			const globalScale = new THREE.Vector3(10, 10, 10);
+			const globalOffset = new THREE.Vector3(0, -0.35, -5); 
+
+			const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+			bloomPass.threshold = 0; //0;
+			bloomPass.strength = 3; //6 //1.5;
+			bloomPass.radius = 0.8; //0.8
+
+			const renderPass = new THREE.RenderPass(scene, camera);
+
+			const composer = new THREE.EffectComposer(renderer);
+			composer.addPass(renderPass);
+			composer.addPass(bloomPass);
+
+			let bigGeoBuffer = new THREE.BufferGeometry();
+			let bigPoints = [];
+			let bigLine = new THREE.LineSegments(bigGeoBuffer, mat1);
+			bigLine.frustumCulled = false;
+			scene.add(bigLine);	
+
+			function createMeshLineMat(_color, _opacity, _lineWidth) {
+			    let mat = new MeshLineMaterial({
+			        transparent: false,
+			        color: _color,
+			        sizeAttenuation: true,
+			        opacity: _opacity, 
+			        lineWidth: _lineWidth,
+			        depthWrite: false,
+			        depthTest: false,
+			        resolution: new THREE.Vector2(meshLineResolution, meshLineResolution),
+			        blending: THREE.AdditiveBlending
+			    });
+
+			    return mat;
+			}
+
+			function updateLatk() {  
+				if (latk.ready) {
+					if (bgLayerIndex >= 0) {
+						try {
+							for (let strokeObj of latk.layers[bgLayerIndex].frames[0].strokes) {
+								drawStroke(strokeObj);
+							}
+						} catch (e) { }
+					}
+
+					for (let i=0; i<latk.layers.length; i++) {
+						if (i !== bgLayerIndex) {
+							try {
+								for (let strokeObj of latk.layers[i].frames[counter].strokes) {
+									drawStroke(strokeObj);
+								}
+							} catch (e) { }
+						}
+					}
+
+					latkFpsDelta += clock.getDelta();
+					if (latkFpsDelta > latkFpsInterval) {
+						latkFpsDelta = 0;
+						counter++;
+						if (counter > latk.layers[longestLayer].frames.length-1) counter = 0;
+					}
+				}
+			}
+
+			function drawStroke(strokeObj) {
+				for (let i=0; i<strokeObj.points.length-1; i++) {
+					let point1 = strokeObj.points[i];
+					let newPoint1 = new THREE.Vector3(point1.co[0], point1.co[1], point1.co[2]);
+					newPoint1.multiply(globalScale).add(globalOffset);
+					bigPoints.push(newPoint1);
+
+					let point2 = strokeObj.points[i+1];
+					let newPoint2 = new THREE.Vector3(point2.co[0], point2.co[1], point2.co[2]);
+					newPoint2.multiply(globalScale).add(globalOffset);
+					bigPoints.push(newPoint2);
+				}
+			}
+
+			function init() {
+				latk = Latk.read("./files/jellyfish.latk");
+
+				latkFpsInterval = 1.0 / latkFps;
+				console.log(latkFpsInterval);
+
+		        for (let i=0; i<latk.layers.length; i++) {
+		            if (latk.layers[i].frames.length > longestLayer) longestLayer = i;
+		        }
+
+		        resetCameraPosition();
+				setupWasd();
+				setupMouse();
+				draw();
+			}
+
+
+			function draw() {
+				bigPoints = [];
+
+				updateLatk();
+
+				//console.log("Total points in frame: " + bigPoints.length);
+				bigGeoBuffer.setFromPoints(bigPoints);
+				
+				updateWasd();
+				
+				composer.render();
+
+				requestAnimationFrame(draw);
+			}
+
+			init();					
+		</script>
+	</body>
+
+</html>
